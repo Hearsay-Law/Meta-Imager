@@ -1,6 +1,6 @@
 # Image Metadata Processor
 
-This application processes PNG images, extracting prompts from metadata and adding standardized keywords based on the content.
+This application processes PNG images, extracting prompts from metadata and adding standardized keywords based on the content. This is useful for extracting from a prompt from AI generated imagery specific keywords or keyword phrases and inserting those into the metadata of the generated image as IPTC metadata. It also places the first "inputs.populated_text" it finds and puts that in the ImageDescription field. In order to make use of this, you'll need to set your environment variables for the input and output directories (rename .env.example to .env) and you'll need to configure your keywords.js to the keywords you care about (and rename keywords.example.js to keywords.js).
 
 ## Setup
 
