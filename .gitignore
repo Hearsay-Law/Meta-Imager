@@ -1,6 +1,16 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment variables
 .env
-input/
-reviewed/
-output/
-keywords.js
+.env.*
+
+# Application directories
+
+# Sensitive files
+src/keywords.js
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
