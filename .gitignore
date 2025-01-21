@@ -6,6 +6,7 @@ node_modules/
 .env.*
 
 # Application directories
+temp/
 
 # Sensitive files
 src/keywords.js

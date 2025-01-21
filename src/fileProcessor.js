@@ -5,6 +5,7 @@ const { keywordsMap } = require("./keywords");
 const KeywordMatcher = require("./services/keywordMatcher");
 const exifToolService = require("./services/exifToolService");
 const { addWatermark } = require("./services/watermarkService");
+const tempFileService = require("./services/tempFileService");
 
 const {
   formatKeywordsLog,
@@ -23,8 +24,12 @@ const keywordMatcher = new KeywordMatcher(keywordsMap);
 async function processFile(filePath, destOutputDir) {
   const operation = "ProcessFile";
   let filename;
+  const tempFiles = [];
 
   try {
+    // Ensure temp directory exists
+    await tempFileService.ensureTempDir();
+
     filename = path.basename(filePath);
     logInfo(operation, `Starting processing: ${filename}`);
 
@@ -87,39 +92,49 @@ async function processFile(filePath, destOutputDir) {
           "ProcessFile",
           `Found keywords:\n${formatKeywordsTable(matchedKeywords)}`
         );
-        // logInfo(operation, `Found keywords`, {
-        //   matchedKeywords,
-        // });
       }
 
       // Create new image with added metadata
       const outputPath = path.join(destOutputDir, filename);
 
-      // First create a temporary file with EXIF metadata using Sharp
-      const tempOutputPath = path.join(destOutputDir, `temp_${filename}`);
+      // Get temporary file paths
+      const tempBasePath = tempFileService.getTempFilePath(
+        "process_",
+        path.extname(filename)
+      );
+      const tempWatermarkPath = tempFileService.getTempFilePath(
+        "watermark_",
+        path.extname(filename)
+      );
+      tempFiles.push(tempBasePath, tempWatermarkPath);
+
+      // First create a temporary file with color profile using Sharp
       await sharp(filePath)
         .withMetadata({
           iccp: "sRGB",
-          exif: {
-            IFD0: {
-              ImageDescription: originalPrompts[0].originalText,
-            },
-          },
         })
-        .toFile(tempOutputPath);
+        .toFile(tempBasePath);
 
-      // Add watermark to the temp file and save to final output
-      await addWatermark(tempOutputPath, outputPath);
+      // Add watermark to the temp file and save to another temp file
+      await addWatermark(tempBasePath, tempWatermarkPath);
 
-      // Clean up temp file
-      await fs.unlink(tempOutputPath);
+      // Copy the watermarked temp file to final destination
+      await fs.copyFile(tempWatermarkPath, outputPath);
 
-      // Then add IPTC keywords using exiftool service
+      // Add both description and keywords using exiftool
       await exifToolService.writeMetadata(outputPath, {
+        Description: originalPrompts[0].originalText,
+        ImageDescription: originalPrompts[0].originalText,
         Keywords: matchedKeywords,
       });
 
-      logSuccess(operation, `Successfully processed: ${filename}`);
+      // Clean up any _original files that exiftool might have created
+      await tempFileService.cleanupOriginal(outputPath);
+
+      logSuccess(operation, `Successfully processed: ${filename}`, {
+        description: originalPrompts[0].originalText.substring(0, 100) + "...",
+        keywordCount: matchedKeywords.length,
+      });
 
       return true;
     } catch (jsonError) {
@@ -133,6 +148,11 @@ async function processFile(filePath, destOutputDir) {
   } catch (error) {
     logError(operation, error, { filename });
     return false;
+  } finally {
+    // Clean up all temporary files
+    for (const tempFile of tempFiles) {
+      await tempFileService.cleanup(tempFile);
+    }
   }
 }
 
