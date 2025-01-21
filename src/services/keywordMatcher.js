@@ -11,8 +11,12 @@ class KeywordMatcher {
 
   normalizeKeywordsMap(keywordsMap) {
     return Object.entries(keywordsMap).reduce((acc, [key, value]) => {
-      acc[key.toLowerCase().trim()] = value;
-      acc[key.toLowerCase().replace(/\s+/g, "")] = value;
+      // Handle both the original key and the space-removed version
+      const normalizedKey = key.toLowerCase().trim();
+      const keyWithoutSpaces = normalizedKey.replace(/\s+/g, "");
+
+      acc[normalizedKey] = value;
+      acc[keyWithoutSpaces] = value;
       return acc;
     }, {});
   }
@@ -68,17 +72,21 @@ class KeywordMatcher {
 
     logDebug("KeywordMatcher", `Processing phrase: ${remainingText}`);
 
-    // Keep trying to match keywords until no text remains or no matches found
     while (remainingText) {
       const result = this.findMatchAtStart(remainingText);
       if (!result) {
-        // If no match at start, remove the first word and continue
         const words = remainingText.split(/\s+/);
         remainingText = words.slice(1).join(" ");
         continue;
       }
 
-      matches.add(result.match);
+      // Handle both single strings and arrays
+      if (Array.isArray(result.match)) {
+        result.match.forEach((match) => matches.add(match));
+      } else {
+        matches.add(result.match);
+      }
+
       remainingText = result.remainingText;
     }
 
