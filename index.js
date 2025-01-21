@@ -5,7 +5,7 @@ const fsWatch = require("fs").watch;
 const path = require("path");
 const { processFile } = require("./src/fileProcessor");
 const exifToolService = require("./src/services/exifToolService");
-const { logInfo, logError } = require("./src/services/logger");
+const { logInfo, logError, logDebug } = require("./src/services/logger");
 
 const app = express();
 let server = null;
@@ -76,6 +76,9 @@ function watchDirectory() {
       }
     });
 
+    // Add the watched path to the watcher object
+    watcher.watchedPath = todaysInputPath;
+
     logInfo("FileWatcher", `Watching for new files in: ${todaysInputPath}`);
 
     watcher.on("error", (error) => {
@@ -90,9 +93,10 @@ function watchDirectory() {
 }
 
 // Check if we need to switch to a new day's directory
+// And then modify checkForNewDay to use this property
 async function checkForNewDay(currentWatcher) {
   const newDirName = getTodaysDirName();
-  const currentWatchPath = currentWatcher._handle.path; // Get current watched path
+  const currentWatchPath = currentWatcher.watchedPath; // Use our stored path
   const expectedPath = getTodaysInputPath();
 
   if (currentWatchPath !== expectedPath) {
@@ -144,7 +148,7 @@ async function initialize() {
     // Check for day change every minute
     setInterval(async () => {
       watcher = await checkForNewDay(watcher);
-    }, 60000);
+    }, 6000); //60000
 
     // Start server
     const PORT = process.env.PORT || 3000;

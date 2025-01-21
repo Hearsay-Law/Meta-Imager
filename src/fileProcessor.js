@@ -5,6 +5,10 @@ const { keywordsMap } = require("./keywords");
 const KeywordMatcher = require("./services/keywordMatcher");
 const exifToolService = require("./services/exifToolService");
 const {
+  formatKeywordsLog,
+  formatKeywordsTable,
+} = require("./services/colorLogger");
+const {
   logSuccess,
   logError,
   logWarning,
@@ -20,10 +24,10 @@ async function processFile(filePath, destOutputDir) {
 
   try {
     filename = path.basename(filePath);
-    logInfo(operation, `Starting processing`, { filename });
+    logInfo(operation, `Starting processing: ${filename}`);
 
     if (!filename.toLowerCase().endsWith(".png")) {
-      logWarning(operation, `Skipping non-PNG file`, { filename });
+      logWarning(operation, `Skipping non-PNG file: ${filename}`);
       return false;
     }
 
@@ -77,9 +81,13 @@ async function processFile(filePath, destOutputDir) {
       matchedKeywords = [...new Set(matchedKeywords)];
 
       if (matchedKeywords.length > 0) {
-        logInfo(operation, `Found keywords`, {
-          matchedKeywords,
-        });
+        logInfo(
+          "ProcessFile",
+          `Found keywords:\n${formatKeywordsTable(matchedKeywords)}`
+        );
+        // logInfo(operation, `Found keywords`, {
+        //   matchedKeywords,
+        // });
       }
 
       // Create new image with added metadata
@@ -102,12 +110,7 @@ async function processFile(filePath, destOutputDir) {
         Keywords: matchedKeywords,
       });
 
-      logSuccess(operation, `Successfully processed file`, {
-        filename,
-        //outputPath,
-        //description: originalPrompts[0].originalText,
-        keywords: matchedKeywords,
-      });
+      logSuccess(operation, `Successfully processed: ${filename}`);
 
       return true;
     } catch (jsonError) {
