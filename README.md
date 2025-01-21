@@ -1,57 +1,162 @@
 # Image Metadata Processor
 
-This application processes PNG images, extracting prompts from metadata and adding standardized keywords based on the content. This is useful for extracting from a prompt from AI generated imagery specific keywords or keyword phrases and inserting those into the metadata of the generated image as IPTC metadata. It also places the first "inputs.populated_text" it finds and puts that in the ImageDescription field. In order to make use of this, you'll need to set your environment variables for the input and output directories (rename .env.example to .env) and you'll need to configure your keywords.js to the keywords you care about (and rename keywords.example.js to keywords.js).
+An automated Node.js application that processes PNG images, adding metadata, watermarks, and keyword-based categorization based on embedded prompt data. Designed for processing AI-generated images with attached prompt information.
 
-## Setup
+## Features
 
-1. Install dependencies:
+- Automated file watching and processing
+- Date-based directory organization
+- Metadata extraction and enrichment
+- Intelligent keyword matching and categorization
+- Automatic watermarking
+- Color profile management (sRGB)
+- Comprehensive logging system
+- Web status endpoint
+
+## Prerequisites
+
+- Node.js (v14 or higher recommended)
+- ExifTool installed on your system ([Download ExifTool](https://exiftool.org/))
+
+## Installation
+
+1. Clone the repository:
+
+```bash
+git clone [repository-url]
+cd image-metadata-processor
+```
+
+2. Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Create environment file:
+3. Create your configuration:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set your input and output directories:
-
-```
-INPUT_DIR=/path/to/input
-OUTPUT_DIR=/path/to/output
-PORT=3000
-```
-
-3. Set up keywords:
+4. Set up your keywords:
 
 ```bash
 cp src/keywords.example.js src/keywords.js
 ```
 
-Edit `src/keywords.js` to customize your keyword mappings.
+## Configuration
 
-## Directory Structure
+### Environment Variables
 
-- `input/` - Place PNG files here for processing
-- `output/` - Processed files will appear here
-- `src/` - Source code
-  - `services/` - Core services
-  - `keywords.js` - Your keyword mappings (not tracked in git)
+Edit `.env` file with your settings:
 
-## Running the Application
+```env
+# Required directory paths
+INPUT_DIR="C:\\Path\\To\\Input\\Directory"
+OUTPUT_DIR="\\\\SERVER\\Share\\Path\\To\\Output\\Directory"
+
+# Optional settings
+PORT=3000        # Web server port (default: 3000)
+LOG_LEVEL=info   # Logging level (default: info)
+```
+
+### Keyword Configuration
+
+Edit `src/keywords.js` to customize your keyword mappings:
+
+```javascript
+const keywordsMap = {
+  detected_term: "Category: Descriptive Label",
+  // Add your keyword mappings...
+};
+```
+
+## Usage
+
+Start the application:
 
 ```bash
 npm start
 ```
 
-The application will watch the input directory and automatically process any new PNG files that are added.
+The application will:
+
+1. Create necessary directories if they don't exist
+2. Watch for new PNG files in the input directory
+3. Process files automatically when detected
+4. Save processed files to the output directory
+
+### Directory Structure
+
+The application creates date-based directories in your input path:
+
+```
+INPUT_DIR/
+└── MM-DD/         # Today's date
+    └── image.png  # Place files here
+```
+
+### File Processing
+
+1. Place PNG files in today's input directory
+2. Files are automatically detected and processed
+3. Processed files appear in the output directory with:
+   - Added metadata
+   - Watermark
+   - Keyword categorization
+   - Color profile correction
+
+### Monitoring
+
+Access the status endpoint:
+
+```
+http://localhost:3000/
+```
+
+Monitor logs in:
+
+- Console output (color-coded)
+- `error.log` (error-level logs)
+- `combined.log` (all logs)
 
 ## Development
 
-```bash
-npm run dev
+### Project Structure
+
+```
+project/
+├── src/
+│   ├── services/
+│   │   ├── exifToolService.js
+│   │   ├── keywordMatcher.js
+│   │   ├── tempFileService.js
+│   │   ├── logger.js
+│   │   └── colorLogger.js
+│   ├── fileProcessor.js
+│   └── keywords.js
+├── temp/          # Temporary processing directory
+├── .env           # Environment configuration
+└── index.js       # Application entry point
 ```
 
-This will start the application with nodemon for automatic reloading during development.
+### Error Handling
+
+- Failed operations are logged to `error.log`
+- Temporary files are automatically cleaned up
+- Process maintains stability through error recovery
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## Acknowledgments
+
+- ExifTool for metadata management
+- Sharp for image processing
+- Winston for logging

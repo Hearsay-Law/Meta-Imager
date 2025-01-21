@@ -7,6 +7,7 @@ node_modules/
 
 # Application directories
 temp/
+notes/
 
 # Sensitive files
 src/keywords.js

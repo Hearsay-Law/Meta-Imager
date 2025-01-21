@@ -1,123 +1,34 @@
 require("dotenv").config();
 const express = require("express");
-const fs = require("fs").promises;
-const fsWatch = require("fs").watch;
-const path = require("path");
-const { processFile } = require("./src/fileProcessor");
+const { logInfo, logError } = require("./src/services/logger");
 const exifToolService = require("./src/services/exifToolService");
-const { logInfo, logError, logDebug } = require("./src/services/logger");
+const WatchMode = require("./src/services/processingModes/WatchMode");
+const BatchMode = require("./src/services/processingModes/BatchMode");
+const { processFile } = require("./src/fileProcessor");
 
 const app = express();
-let server = null;
+app.use(express.json()); // Add JSON body parsing
 
-// Define directories with environment variables
+let server = null;
+let processingMode = null;
+
+// Validate required environment variables
 const inputDir = process.env.INPUT_DIR;
 const outputDir = process.env.OUTPUT_DIR;
 
-// Validate required environment variables
 if (!inputDir || !outputDir) {
   console.error("ERROR: INPUT_DIR and OUTPUT_DIR must be set in .env file");
   process.exit(1);
-}
-
-// Get today's date-specific directory name
-function getTodaysDirName() {
-  const today = new Date();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-  return `${month}-${day}`;
-}
-
-// Get full path for today's input directory
-function getTodaysInputPath() {
-  return path.join(inputDir, getTodaysDirName());
-}
-
-// Ensure directories exist
-async function ensureDirectories() {
-  const todaysInputPath = getTodaysInputPath();
-
-  for (const dir of [inputDir, outputDir, todaysInputPath]) {
-    try {
-      await fs.access(dir);
-      logInfo("Setup", `Confirmed access to directory: ${dir}`);
-    } catch {
-      try {
-        await fs.mkdir(dir, { recursive: true });
-        logInfo("Setup", `Created directory: ${dir}`);
-      } catch (error) {
-        logError("Setup", error, { dir });
-        throw error;
-      }
-    }
-  }
-}
-
-// Watch for new files
-function watchDirectory() {
-  const todaysInputPath = getTodaysInputPath();
-
-  try {
-    const watcher = fsWatch(todaysInputPath, async (eventType, filename) => {
-      if (eventType === "rename" && filename) {
-        const filePath = path.join(todaysInputPath, filename);
-
-        try {
-          await fs.access(filePath);
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          logInfo("FileWatcher", `New file detected: ${filename}`);
-          await processFile(filePath, outputDir);
-        } catch (error) {
-          if (error.code === "ENOENT") {
-            return;
-          }
-          logError("FileWatcher", error, { filename });
-        }
-      }
-    });
-
-    // Add the watched path to the watcher object
-    watcher.watchedPath = todaysInputPath;
-
-    logInfo("FileWatcher", `Watching for new files in: ${todaysInputPath}`);
-
-    watcher.on("error", (error) => {
-      logError("FileWatcher", error);
-    });
-
-    return watcher;
-  } catch (error) {
-    logError("FileWatcher", error);
-    throw error;
-  }
-}
-
-// Check if we need to switch to a new day's directory
-// And then modify checkForNewDay to use this property
-async function checkForNewDay(currentWatcher) {
-  const newDirName = getTodaysDirName();
-  const currentWatchPath = currentWatcher.watchedPath; // Use our stored path
-  const expectedPath = getTodaysInputPath();
-
-  if (currentWatchPath !== expectedPath) {
-    logInfo("DayChange", `Switching to new day's directory: ${newDirName}`);
-
-    // Close old watcher
-    currentWatcher.close();
-
-    // Ensure new directory exists and start new watcher
-    await ensureDirectories();
-    return watchDirectory();
-  }
-
-  return currentWatcher;
 }
 
 // Graceful shutdown handler
 async function shutdown(signal) {
   logInfo("Shutdown", `${signal} received. Starting graceful shutdown...`);
 
-  // Close Express server
+  if (processingMode) {
+    await processingMode.stop();
+  }
+
   if (server) {
     await new Promise((resolve) => {
       server.close(() => {
@@ -127,28 +38,50 @@ async function shutdown(signal) {
     });
   }
 
-  // Close ExifTool
   await exifToolService.cleanup();
 
   logInfo("Shutdown", "Graceful shutdown completed");
   process.exit(0);
 }
 
+// Mode switching function
+async function switchMode(mode, options = {}) {
+  if (processingMode) {
+    await processingMode.stop();
+  }
+
+  const fileProcessor = {
+    processFile: (filePath) => processFile(filePath, outputDir),
+  };
+
+  switch (mode) {
+    case "watch":
+      processingMode = new WatchMode(fileProcessor, inputDir);
+      break;
+    case "batch":
+      if (!options.directory) {
+        throw new Error("Directory is required for batch mode");
+      }
+      processingMode = new BatchMode(fileProcessor, options.directory);
+      break;
+    default:
+      throw new Error(`Unknown mode: ${mode}`);
+  }
+
+  await processingMode.start();
+  return processingMode.status();
+}
+
 // Initialize
 async function initialize() {
   try {
-    await ensureDirectories();
-    let watcher = watchDirectory();
+    // Start in watch mode by default
+    await switchMode("watch");
 
     // Setup cleanup handlers
     process.on("SIGINT", () => shutdown("SIGINT"));
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGUSR2", () => shutdown("SIGUSR2")); // For nodemon restart
-
-    // Check for day change every minute
-    setInterval(async () => {
-      watcher = await checkForNewDay(watcher);
-    }, 6000); //60000
 
     // Start server
     const PORT = process.env.PORT || 3000;
@@ -167,7 +100,6 @@ async function initialize() {
     });
 
     logInfo("Setup", "Application initialized successfully");
-    return watcher;
   } catch (error) {
     logError("Setup", error);
     process.exit(1);
@@ -176,13 +108,22 @@ async function initialize() {
 
 // Routes
 app.get("/", (req, res) => {
-  const todaysInputPath = getTodaysInputPath();
   res.json({
     message: "File processor running",
-    inputDir,
-    todaysInputPath,
-    outputDir,
+    ...processingMode.status(),
   });
+});
+
+app.post("/mode", async (req, res) => {
+  try {
+    const { mode, options } = req.body;
+    const status = await switchMode(mode, options);
+    res.json(status);
+  } catch (error) {
+    res.status(400).json({
+      error: error.message,
+    });
+  }
 });
 
 // Start the application

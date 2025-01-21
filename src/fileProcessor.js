@@ -87,7 +87,10 @@ async function processFile(filePath, destOutputDir) {
       // Remove duplicates from matchedKeywords
       matchedKeywords = [...new Set(matchedKeywords)];
 
-      if (matchedKeywords.length > 0) {
+      // Add watermark keyword
+      matchedKeywords.push("Watermark: AI");
+
+      if (matchedKeywords.length > 1) {
         logInfo(
           "ProcessFile",
           `Found keywords:\n${formatKeywordsTable(matchedKeywords)}`
