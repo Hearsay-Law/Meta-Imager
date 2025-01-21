@@ -4,6 +4,8 @@ const sharp = require("sharp");
 const { keywordsMap } = require("./keywords");
 const KeywordMatcher = require("./services/keywordMatcher");
 const exifToolService = require("./services/exifToolService");
+const { addWatermark } = require("./services/watermarkService");
+
 const {
   formatKeywordsLog,
   formatKeywordsTable,
@@ -93,7 +95,8 @@ async function processFile(filePath, destOutputDir) {
       // Create new image with added metadata
       const outputPath = path.join(destOutputDir, filename);
 
-      // First create the output file with EXIF description using Sharp
+      // First create a temporary file with EXIF metadata using Sharp
+      const tempOutputPath = path.join(destOutputDir, `temp_${filename}`);
       await sharp(filePath)
         .withMetadata({
           iccp: "sRGB",
@@ -103,7 +106,13 @@ async function processFile(filePath, destOutputDir) {
             },
           },
         })
-        .toFile(outputPath);
+        .toFile(tempOutputPath);
+
+      // Add watermark to the temp file and save to final output
+      await addWatermark(tempOutputPath, outputPath);
+
+      // Clean up temp file
+      await fs.unlink(tempOutputPath);
 
       // Then add IPTC keywords using exiftool service
       await exifToolService.writeMetadata(outputPath, {
