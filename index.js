@@ -5,9 +5,14 @@ const exifToolService = require("./src/services/exifToolService");
 const WatchMode = require("./src/services/processingModes/WatchMode");
 const BatchMode = require("./src/services/processingModes/BatchMode");
 const { processFile } = require("./src/fileProcessor");
+const configService = require("./src/services/configService");
+const path = require("path");
 
 const app = express();
 app.use(express.json()); // Add JSON body parsing
+
+// Serve static files
+app.use(express.static(path.join(__dirname, "src/public")));
 
 let server = null;
 let processingMode = null;
@@ -75,6 +80,9 @@ async function switchMode(mode, options = {}) {
 // Initialize
 async function initialize() {
   try {
+    // Load configuration first
+    await configService.load();
+
     // Start in watch mode by default
     await switchMode("watch");
 
@@ -123,6 +131,26 @@ app.post("/mode", async (req, res) => {
     res.status(400).json({
       error: error.message,
     });
+  }
+});
+
+app.get("/config", (req, res) => {
+  try {
+    const config = configService.getAll();
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/config/:path", async (req, res) => {
+  try {
+    const { path } = req.params;
+    const { value } = req.body;
+    const updatedConfig = await configService.update(path, value);
+    res.json(updatedConfig);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
 });
 

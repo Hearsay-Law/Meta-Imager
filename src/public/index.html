@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Processor Configuration</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8">Image Processor Configuration</h1>
+        
+        <!-- Status Section -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Status</h2>
+            <div id="statusDisplay" class="space-y-2">
+                Loading...
+            </div>
+        </div>
+
+        <!-- Configuration Section -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Settings</h2>
+            <div id="configDisplay" class="space-y-4">
+                <!-- Processing Settings -->
+                <div class="border-b pb-4">
+                    <h3 class="text-lg font-medium mb-3">Processing Options</h3>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" id="watermarkToggle" class="form-checkbox h-5 w-5 text-blue-600">
+                        <span>Add Watermark</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Processing Mode Section -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Processing Mode</h2>
+            <div class="space-y-4">
+                <div class="flex space-x-4">
+                    <button id="watchModeBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                        Watch Mode
+                    </button>
+                    <button id="batchModeBtn" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                        Batch Mode
+                    </button>
+                </div>
+                <div id="batchModeInput" class="hidden">
+                    <input type="text" id="batchDirectory" placeholder="Enter directory path" 
+                           class="w-full p-2 border rounded">
+                    <button id="startBatchBtn" class="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                        Start Batch Processing
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Fetch and display status
+        async function updateStatus() {
+            try {
+                const response = await fetch('/');
+                const data = await response.json();
+                
+                let statusHTML = `
+                    <p><strong>Mode:</strong> ${data.mode}</p>
+                    <p><strong>Active:</strong> ${data.active}</p>
+                `;
+
+                if (data.mode === 'batch' && data.progress) {
+                    statusHTML += `
+                        <p><strong>Progress:</strong> ${data.progress.processed}/${data.progress.total} 
+                        (${data.progress.percentage}%)</p>
+                    `;
+                }
+
+                document.getElementById('statusDisplay').innerHTML = statusHTML;
+            } catch (error) {
+                console.error('Error fetching status:', error);
+            }
+        }
+
+        // Fetch and display configuration
+        async function loadConfig() {
+            try {
+                const response = await fetch('/config');
+                const config = await response.json();
+                
+                // Update watermark toggle
+                document.getElementById('watermarkToggle').checked = config.processing.addWatermark;
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+
+        // Update configuration
+        async function updateConfig(path, value) {
+            try {
+                const response = await fetch(`/config/${path}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ value })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to update configuration');
+                }
+            } catch (error) {
+                console.error('Error updating config:', error);
+            }
+        }
+
+        // Switch processing mode
+        async function switchMode(mode, options = {}) {
+            try {
+                const response = await fetch('/mode', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ mode, options })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to switch mode');
+                }
+                
+                updateStatus();
+            } catch (error) {
+                console.error('Error switching mode:', error);
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('watermarkToggle').addEventListener('change', (e) => {
+            updateConfig('processing.addWatermark', e.target.checked);
+        });
+
+        document.getElementById('watchModeBtn').addEventListener('click', () => {
+            switchMode('watch');
+        });
+
+        document.getElementById('batchModeBtn').addEventListener('click', () => {
+            document.getElementById('batchModeInput').classList.remove('hidden');
+        });
+
+        document.getElementById('startBatchBtn').addEventListener('click', () => {
+            const directory = document.getElementById('batchDirectory').value;
+            if (directory) {
+                switchMode('batch', { directory });
+            }
+        });
+
+        // Initial load
+        loadConfig();
+        updateStatus();
+        
+        // Update status periodically
+        setInterval(updateStatus, 5000);
+    </script>
+</body>
+</html>
