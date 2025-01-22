@@ -6,6 +6,7 @@ const KeywordMatcher = require("./services/keywordMatcher");
 const exifToolService = require("./services/exifToolService");
 const { addWatermark } = require("./services/watermarkService");
 const tempFileService = require("./services/tempFileService");
+const configService = require("./services/configService");
 
 const {
   formatKeywordsLog,
@@ -87,8 +88,10 @@ async function processFile(filePath, destOutputDir) {
       // Remove duplicates from matchedKeywords
       matchedKeywords = [...new Set(matchedKeywords)];
 
-      // Add watermark keyword
-      matchedKeywords.push("Watermark: AI");
+      // Add watermark keyword if we watermarked.
+      if (configService.get("processing.addWatermark")) {
+        matchedKeywords.push("Watermark: AI");
+      }
 
       if (matchedKeywords.length > 1) {
         logInfo(
@@ -118,11 +121,12 @@ async function processFile(filePath, destOutputDir) {
         })
         .toFile(tempBasePath);
 
-      // Add watermark to the temp file and save to another temp file
-      await addWatermark(tempBasePath, tempWatermarkPath);
-
-      // Copy the watermarked temp file to final destination
-      await fs.copyFile(tempWatermarkPath, outputPath);
+      if (configService.get("processing.addWatermark")) {
+        await addWatermark(tempBasePath, tempWatermarkPath);
+        await fs.copyFile(tempWatermarkPath, outputPath);
+      } else {
+        await fs.copyFile(tempBasePath, outputPath);
+      }
 
       // Add both description and keywords using exiftool
       await exifToolService.writeMetadata(outputPath, {
