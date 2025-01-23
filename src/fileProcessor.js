@@ -1,3 +1,5 @@
+"use strict";
+
 const fs = require("fs").promises;
 const path = require("path");
 const sharp = require("sharp");
@@ -7,11 +9,11 @@ const exifToolService = require("./services/exifToolService");
 const { addWatermark } = require("./services/watermarkService");
 const tempFileService = require("./services/tempFileService");
 const configService = require("./services/configService");
+const PromptExtractionService = require("./services/promptExtraction/promptExtractionService");
+const ParametersStrategy = require("./services/promptExtraction/strategies/parametersStrategy");
+const JsonPromptStrategy = require("./services/promptExtraction/strategies/jsonPromptStrategy");
 
-const {
-  formatKeywordsLog,
-  formatKeywordsTable,
-} = require("./services/colorLogger");
+const { formatKeywordsTable } = require("./services/colorLogger");
 const {
   logSuccess,
   logError,
@@ -21,6 +23,18 @@ const {
 } = require("./services/logger");
 
 const keywordMatcher = new KeywordMatcher(keywordsMap);
+const logger = {
+  logSuccess,
+  logError,
+  logWarning,
+  logInfo,
+  logDebug,
+};
+
+const promptExtractor = new PromptExtractionService(
+  [ParametersStrategy, JsonPromptStrategy],
+  logger
+);
 
 async function processFile(filePath, destOutputDir) {
   const operation = "ProcessFile";
@@ -28,9 +42,7 @@ async function processFile(filePath, destOutputDir) {
   const tempFiles = [];
 
   try {
-    // Ensure temp directory exists
     await tempFileService.ensureTempDir();
-
     filename = path.basename(filePath);
     logInfo(operation, `Starting processing: ${filename}`);
 
@@ -40,7 +52,6 @@ async function processFile(filePath, destOutputDir) {
     }
 
     const metadata = await sharp(filePath).metadata();
-    let originalPrompts = [];
     let matchedKeywords = [];
 
     if (!metadata.comments) {
@@ -48,115 +59,88 @@ async function processFile(filePath, destOutputDir) {
       return false;
     }
 
-    const promptComment = metadata.comments.find(
-      (comment) => comment.keyword === "prompt"
+    const extractionResult = await promptExtractor.extractPrompts(metadata);
+
+    if (!extractionResult) {
+      logWarning(
+        operation,
+        `No valid prompts found using any available strategy`,
+        { filename }
+      );
+      return false;
+    }
+
+    const { prompts } = extractionResult;
+    logDebug(operation, "Extracted prompts", {
+      filename,
+      strategy: extractionResult.strategy,
+      promptCount: prompts.length,
+      firstPrompt: prompts[0].originalText.substring(0, 100) + "...",
+    });
+
+    // Process keywords for all prompts
+    for (const prompt of prompts) {
+      const keywords = keywordMatcher.findKeywords(prompt.originalText);
+      matchedKeywords.push(...keywords);
+    }
+
+    // Remove duplicates
+    matchedKeywords = [...new Set(matchedKeywords)];
+
+    if (configService.get("processing.addWatermark")) {
+      matchedKeywords.push("Watermark: AI");
+    }
+
+    if (matchedKeywords.length > 1) {
+      logInfo(
+        operation,
+        `Found keywords:\n${formatKeywordsTable(matchedKeywords)}`
+      );
+    }
+
+    const outputPath = path.join(destOutputDir, filename);
+    const tempBasePath = tempFileService.getTempFilePath(
+      "process_",
+      path.extname(filename)
     );
+    const tempWatermarkPath = tempFileService.getTempFilePath(
+      "watermark_",
+      path.extname(filename)
+    );
+    tempFiles.push(tempBasePath, tempWatermarkPath);
 
-    if (!promptComment) {
-      logWarning(operation, `No prompt comment found in metadata`, {
-        filename,
-      });
-      return false;
+    await sharp(filePath)
+      .withMetadata({
+        iccp: "sRGB",
+      })
+      .toFile(tempBasePath);
+
+    if (configService.get("processing.addWatermark")) {
+      await addWatermark(tempBasePath, tempWatermarkPath);
+      await fs.copyFile(tempWatermarkPath, outputPath);
+    } else {
+      await fs.copyFile(tempBasePath, outputPath);
     }
 
-    try {
-      const promptData = JSON.parse(promptComment.text);
-      logDebug(operation, "Parsed prompt data", { filename, promptData });
+    await exifToolService.writeMetadata(outputPath, {
+      Description: prompts[0].originalText,
+      ImageDescription: prompts[0].originalText,
+      Keywords: matchedKeywords,
+    });
 
-      // Process all entries for both prompts and keywords
-      for (const [key, value] of Object.entries(promptData)) {
-        if (value.inputs && value.inputs.populated_text) {
-          // Store original prompts
-          originalPrompts.push({
-            entryKey: key,
-            originalText: value.inputs.populated_text,
-          });
+    await tempFileService.cleanupOriginal(outputPath);
 
-          // Get keywords using the keyword matcher service
-          const keywords = keywordMatcher.findKeywords(
-            value.inputs.populated_text
-          );
-          matchedKeywords.push(...keywords);
-        }
-      }
+    logSuccess(operation, `Successfully processed: ${filename}`, {
+      description: prompts[0].originalText.substring(0, 100) + "...",
+      keywordCount: matchedKeywords.length,
+      strategy: extractionResult.strategy,
+    });
 
-      if (originalPrompts.length === 0) {
-        logWarning(operation, `No valid prompts found`, { filename });
-        return false;
-      }
-
-      // Remove duplicates from matchedKeywords
-      matchedKeywords = [...new Set(matchedKeywords)];
-
-      // Add watermark keyword if we watermarked.
-      if (configService.get("processing.addWatermark")) {
-        matchedKeywords.push("Watermark: AI");
-      }
-
-      if (matchedKeywords.length > 1) {
-        logInfo(
-          "ProcessFile",
-          `Found keywords:\n${formatKeywordsTable(matchedKeywords)}`
-        );
-      }
-
-      // Create new image with added metadata
-      const outputPath = path.join(destOutputDir, filename);
-
-      // Get temporary file paths
-      const tempBasePath = tempFileService.getTempFilePath(
-        "process_",
-        path.extname(filename)
-      );
-      const tempWatermarkPath = tempFileService.getTempFilePath(
-        "watermark_",
-        path.extname(filename)
-      );
-      tempFiles.push(tempBasePath, tempWatermarkPath);
-
-      // First create a temporary file with color profile using Sharp
-      await sharp(filePath)
-        .withMetadata({
-          iccp: "sRGB",
-        })
-        .toFile(tempBasePath);
-
-      if (configService.get("processing.addWatermark")) {
-        await addWatermark(tempBasePath, tempWatermarkPath);
-        await fs.copyFile(tempWatermarkPath, outputPath);
-      } else {
-        await fs.copyFile(tempBasePath, outputPath);
-      }
-
-      // Add both description and keywords using exiftool
-      await exifToolService.writeMetadata(outputPath, {
-        Description: originalPrompts[0].originalText,
-        ImageDescription: originalPrompts[0].originalText,
-        Keywords: matchedKeywords,
-      });
-
-      // Clean up any _original files that exiftool might have created
-      await tempFileService.cleanupOriginal(outputPath);
-
-      logSuccess(operation, `Successfully processed: ${filename}`, {
-        description: originalPrompts[0].originalText.substring(0, 100) + "...",
-        keywordCount: matchedKeywords.length,
-      });
-
-      return true;
-    } catch (jsonError) {
-      logError(operation, jsonError, {
-        filename,
-        context: "JSON parsing",
-        rawData: promptComment.text,
-      });
-      return false;
-    }
+    return true;
   } catch (error) {
     logError(operation, error, { filename });
     return false;
   } finally {
-    // Clean up all temporary files
     for (const tempFile of tempFiles) {
       await tempFileService.cleanup(tempFile);
     }

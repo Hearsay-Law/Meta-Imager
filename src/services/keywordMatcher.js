@@ -94,6 +94,8 @@ class KeywordMatcher {
   }
 
   findKeywords(text) {
+    if (!text || typeof text !== "string") return [];
+
     const matchedKeywords = new Set();
 
     // Split by commas first
