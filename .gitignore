@@ -16,3 +16,22 @@ src/keywords.js
 # OS files
 .DS_Store
 Thumbs.db
+
+# Docker files
+*.env
+.docker/
+docker-compose.override.yml
+docker-compose.*.yml
+!docker-compose.yml
+
+# Build artifacts
+dist/
+build/
+*.tar
+*.gz
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
