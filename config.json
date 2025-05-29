@@ -1,5 +1,8 @@
 {
   "processing": {
     "addWatermark": true
+  },
+  "runtime": {
+    "currentTargetSubfolder": "05-29 handjob"
   }
 }

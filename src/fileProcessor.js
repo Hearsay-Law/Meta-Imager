@@ -1,3 +1,4 @@
+// src/fileProcessor.js
 "use strict";
 
 const fs = require("fs").promises;
@@ -44,7 +45,10 @@ async function processFile(filePath, destOutputDir) {
   try {
     await tempFileService.ensureTempDir();
     filename = path.basename(filePath);
-    logInfo(operation, `Starting processing: ${filename}`);
+    logInfo(
+      operation,
+      `Starting processing: ${filename} for output to ${destOutputDir}`
+    ); // Added destOutputDir for clarity
 
     if (!filename.toLowerCase().endsWith(".png")) {
       logWarning(operation, `Skipping non-PNG file: ${filename}`);
@@ -92,6 +96,7 @@ async function processFile(filePath, destOutputDir) {
     }
 
     if (matchedKeywords.length > 1) {
+      // Corrected from > 1 to > 0 or just log always if desired
       logInfo(
         operation,
         `Found keywords:\n${formatKeywordsTable(matchedKeywords)}`
@@ -99,6 +104,28 @@ async function processFile(filePath, destOutputDir) {
     }
 
     const outputPath = path.join(destOutputDir, filename);
+
+    // --- New/Modified Section: Ensure output directory exists ---
+    // This ensures the specific target directory (which might be a subfolder) exists.
+    try {
+      await fs.mkdir(destOutputDir, { recursive: true });
+      logDebug(operation, `Ensured output directory exists: ${destOutputDir}`, {
+        filename,
+      });
+    } catch (dirError) {
+      logError(
+        operation,
+        `Failed to create output directory: ${destOutputDir}. Error: ${dirError.message}`,
+        { filename }
+      );
+      // Depending on desired behavior, you might want to throw this error
+      // or return false to indicate processing failure due to directory issue.
+      throw new Error(
+        `Cannot create output directory ${destOutputDir}: ${dirError.message}`
+      );
+    }
+    // --- End New/Modified Section ---
+
     const tempBasePath = tempFileService.getTempFilePath(
       "process_",
       path.extname(filename)
@@ -134,11 +161,15 @@ async function processFile(filePath, destOutputDir) {
       description: prompts[0].originalText.substring(0, 100) + "...",
       keywordCount: matchedKeywords.length,
       strategy: extractionResult.strategy,
+      output: outputPath, // Added output path to success log
     });
 
     return true;
   } catch (error) {
-    logError(operation, error, { filename });
+    logError(operation, error, {
+      filename,
+      outputPath: path.join(destOutputDir, filename || "unknown_file"),
+    });
     return false;
   } finally {
     for (const tempFile of tempFiles) {
