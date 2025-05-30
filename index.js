@@ -3,7 +3,6 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const fs = require("fs").promises;
-// readline is no longer directly used here for prompting, but ConsoleManager might use it internally.
 
 const { logInfo, logError } = require("./src/services/logger");
 const exifToolService = require("./src/services/exifToolService");
@@ -11,7 +10,7 @@ const WatchMode = require("./src/services/processingModes/WatchMode");
 const BatchMode = require("./src/services/processingModes/BatchMode");
 const { processFile } = require("./src/fileProcessor");
 const configService = require("./src/services/configService");
-const ConsoleManager = require("./src/services/ConsoleManager"); // Import the new class
+const ConsoleManager = require("./src/services/ConsoleManager");
 
 const app = express();
 app.use(express.json());
@@ -19,7 +18,7 @@ app.use(express.static(path.join(__dirname, "src/public")));
 
 let server = null;
 let processingMode = null;
-let consoleManager = null; // Instance of ConsoleManager
+let consoleManager = null;
 
 const inputDir = process.env.INPUT_DIR;
 const baseOutputDir = process.env.OUTPUT_DIR;
@@ -38,15 +37,8 @@ function getCurrentTargetDir() {
 
 function displayCurrentTarget() {
   const currentTarget = getCurrentTargetDir();
-  console.log(`\n➡️ Current target directory: ${currentTarget}`);
+  console.log(`\n➡️  Current target directory: ${currentTarget}`);
   logInfo("TargetDir", `Current target directory set to: ${currentTarget}`);
-  if (consoleManager) {
-    // If console manager is active, re-display its menu after target change
-    // Or let it handle its own display refresh if it needs to.
-    // For now, we'll assume it might need a cue if displayMenu is only on start.
-    // If ConsoleManager's displayMenu is called internally upon action, this isn't needed.
-    // consoleManager.displayMenu();
-  }
 }
 
 // Graceful shutdown handler
@@ -54,7 +46,7 @@ async function shutdown(signal) {
   logInfo("Shutdown", `${signal} received. Starting graceful shutdown...`);
 
   if (consoleManager) {
-    consoleManager.stop(); // Stop console manager, restores terminal
+    consoleManager.stop();
     consoleManager = null;
   }
 
@@ -78,8 +70,14 @@ async function shutdown(signal) {
     );
 
   logInfo("Shutdown", "Graceful shutdown completed");
-  // process.stdin.setRawMode(false) is now handled by ConsoleManager.stop()
-  // and also as a final fallback in the SIGINT handler.
+  // Ensure terminal is sane even if consoleManager.stop() had issues or wasn't called
+  if (process.stdin.isTTY) {
+    try {
+      process.stdin.setRawMode(false);
+    } catch (e) {
+      /* ignore */
+    }
+  }
   process.exit(0);
 }
 
@@ -101,6 +99,7 @@ async function switchMode(mode, options = {}) {
       "SwitchMode",
       `Failed to create effective output directory ${effectiveOutputDir}: ${err.message}`
     );
+    // Potentially throw error or prevent mode switch if directory creation is critical
   }
 
   const fileProcessor = {
@@ -113,11 +112,13 @@ async function switchMode(mode, options = {}) {
       break;
     case "batch":
       if (!options.directory) {
+        logError("SwitchMode", "Directory is required for batch mode.");
         throw new Error("Directory is required for batch mode");
       }
       processingMode = new BatchMode(fileProcessor, options.directory);
       break;
     default:
+      logError("SwitchMode", `Unknown mode attempt: ${mode}`);
       throw new Error(`Unknown mode: ${mode}`);
   }
 
@@ -126,6 +127,11 @@ async function switchMode(mode, options = {}) {
   }
 
   await processingMode.start();
+  logInfo(
+    "SwitchMode",
+    `Switched to ${mode} mode. Status:`,
+    processingMode.status()
+  );
   return processingMode.status();
 }
 
@@ -133,13 +139,14 @@ async function switchMode(mode, options = {}) {
 async function initialize() {
   try {
     await configService.load();
+
+    // Initial mode switch and target display are important before console manager starts
+    // so that the first '?' press has info to show.
     await switchMode("watch"); // Start in default mode
     displayCurrentTarget(); // Show initial target
 
-    // Initialize and start ConsoleManager
     consoleManager = new ConsoleManager();
 
-    // Listen for events from ConsoleManager
     consoleManager.on("set-target-subfolder", async (subfolderName) => {
       logInfo(
         "ConsoleEvent",
@@ -161,7 +168,7 @@ async function initialize() {
           console.error(
             `Error creating subfolder: ${err.message}. Please check permissions.`
           );
-          // Optionally, don't update config if dir creation fails
+          // Decide if config update should be skipped if dir creation fails
         }
       }
       await configService.update(
@@ -173,6 +180,7 @@ async function initialize() {
       if (processingMode) {
         const currentModeType =
           processingMode instanceof WatchMode ? "watch" : "batch";
+        // Preserve existing options if possible, or reset if needed.
         const currentOptions = processingMode.getOptions
           ? processingMode.getOptions()
           : {};
@@ -182,13 +190,43 @@ async function initialize() {
         );
         await switchMode(currentModeType, currentOptions);
       }
-      // After action, ConsoleManager should ideally re-display its own menu,
-      // or we call it here if needed. The `promptForSubfolder` in ConsoleManager
-      // intentionally doesn't call displayMenu in its finally block, assuming the
-      // event handler here (or a subsequent user action) will refresh the overall view.
-      // Let's have ConsoleManager handle its own menu display after its actions.
-      // (The ConsoleManager's keypress listener will call displayMenu after prompt)
-      // So, no consoleManager.displayMenu() here, let the keypress listener in ConsoleManager manage it.
+      // ConsoleManager's keypress listener will re-display its menu
+    });
+
+    consoleManager.on("request-status-display", () => {
+      logInfo("ConsoleEvent", "Received request-status-display event.");
+      console.log(); // Add a newline for better formatting before status
+
+      displayCurrentTarget(); // Shows the current target directory
+
+      if (processingMode && typeof processingMode.status === "function") {
+        const status = processingMode.status();
+        console.log(`⚙️  Mode: ${status.mode}`);
+        if (status.details) {
+          // General details if provided
+          console.log(`   Status: ${status.details}`);
+        }
+        if (status.mode === "watch" && typeof status.watching !== "undefined") {
+          console.log(`   Watching: ${status.watching}`);
+        } else if (status.mode === "batch") {
+          if (typeof status.directory !== "undefined") {
+            console.log(`   Directory: ${status.directory}`);
+          }
+          if (
+            typeof status.processed !== "undefined" &&
+            typeof status.total !== "undefined"
+          ) {
+            console.log(
+              `   Progress: ${status.processed}/${status.total} files`
+            );
+          }
+        }
+      } else {
+        console.log(
+          "⚙️  Mode: N/A (Processing mode not active or status unavailable)"
+        );
+      }
+      // ConsoleManager's _keypressListener should have already called its displayMenu()
     });
 
     consoleManager.on("shutdown-request", async (signalOrigin) => {
@@ -199,7 +237,7 @@ async function initialize() {
       await shutdown(signalOrigin || "CONSOLE_REQUEST");
     });
 
-    consoleManager.start(); // Start listening for console commands
+    consoleManager.start(); // Start listening for console commands AFTER setting up all listeners
 
     // Setup global signal handlers
     process.on("SIGINT", async () => {
@@ -210,8 +248,6 @@ async function initialize() {
     process.on("SIGUSR2", async () => {
       // For nodemon restart
       logInfo("SignalHandler", "SIGUSR2 (nodemon) received.");
-      // For nodemon, we want a clean shutdown but not process.exit(0)
-      // as nodemon handles the restart.
       if (consoleManager) consoleManager.stop();
       if (processingMode) await processingMode.stop();
       if (server) await new Promise((resolve) => server.close(resolve));
@@ -230,7 +266,6 @@ async function initialize() {
     server.on("error", (error) => {
       logError("Setup", error, { port: PORT });
       if (error.code === "EADDRINUSE") {
-        // Ensure console is usable if server fails to start
         if (consoleManager) consoleManager.stop();
         process.exit(1);
       }
@@ -239,18 +274,22 @@ async function initialize() {
     logInfo("Setup", "Application initialized successfully");
   } catch (error) {
     logError("Setup", error, { context: "Initialization failed" });
-    if (consoleManager)
+    if (consoleManager) {
       try {
         consoleManager.stop();
       } catch (e) {
-        /*ignore*/
+        logError("Setup", e, {
+          context: "ConsoleManager stop failed during init error",
+        });
       }
-    else if (process.stdin.isTTY)
+    } else if (process.stdin.isTTY) {
+      // Fallback if consoleManager didn't initialize or stop correctly
       try {
         process.stdin.setRawMode(false);
       } catch (e) {
-        /*ignore*/
+        /* ignore */
       }
+    }
     process.exit(1);
   }
 }
@@ -259,7 +298,7 @@ async function initialize() {
 app.get("/", (req, res) => {
   res.json({
     message: "File processor running",
-    ...(processingMode
+    ...(processingMode && typeof processingMode.status === "function"
       ? processingMode.status()
       : { mode: "N/A", status: "Not initialized" }),
   });
@@ -268,9 +307,13 @@ app.get("/", (req, res) => {
 app.post("/mode", async (req, res) => {
   try {
     const { mode, options } = req.body;
-    const status = await switchMode(mode, options);
+    if (!mode) {
+      return res.status(400).json({ error: "Mode is required" });
+    }
+    const status = await switchMode(mode, options || {});
     res.json(status);
   } catch (error) {
+    logError("API /mode", error.message, { body: req.body });
     res.status(400).json({ error: error.message });
   }
 });
@@ -280,6 +323,7 @@ app.get("/config", (req, res) => {
     const config = configService.getAll();
     res.json(config);
   } catch (error) {
+    logError("API /config GET", error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -288,58 +332,21 @@ app.put("/config/:path", async (req, res) => {
   try {
     const { path: configPathFromReq } = req.params;
     const { value } = req.body;
+    if (typeof value === "undefined") {
+      return res
+        .status(400)
+        .json({ error: "Value is required in request body" });
+    }
     const updatedConfig = await configService.update(configPathFromReq, value);
     res.json(updatedConfig);
   } catch (error) {
+    logError("API /config PUT", error.message, {
+      path: req.params.path,
+      value: req.body.value,
+    });
     res.status(400).json({ error: error.message });
   }
 });
 
-// Mode switching function (ensure this is complete from your previous working version)
-// (Included from previous response for completeness)
-async function switchMode(mode, options = {}) {
-  if (processingMode) {
-    await processingMode.stop();
-  }
-
-  const effectiveOutputDir = getCurrentTargetDir();
-  try {
-    await fs.mkdir(effectiveOutputDir, { recursive: true });
-    logInfo(
-      "SwitchMode",
-      `Ensured effective output directory exists: ${effectiveOutputDir}`
-    );
-  } catch (err) {
-    logError(
-      "SwitchMode",
-      `Failed to create effective output directory ${effectiveOutputDir}: ${err.message}`
-    );
-  }
-
-  const fileProcessor = {
-    processFile: (filePath) => processFile(filePath, effectiveOutputDir),
-  };
-
-  switch (mode) {
-    case "watch":
-      processingMode = new WatchMode(fileProcessor, inputDir);
-      break;
-    case "batch":
-      if (!options.directory) {
-        throw new Error("Directory is required for batch mode");
-      }
-      processingMode = new BatchMode(fileProcessor, options.directory);
-      break;
-    default:
-      throw new Error(`Unknown mode: ${mode}`);
-  }
-
-  if (processingMode && typeof processingMode.setOptions === "function") {
-    processingMode.setOptions(options); // If your modes use this
-  }
-
-  await processingMode.start();
-  return processingMode.status();
-}
-
+// Kick off the application
 initialize();
