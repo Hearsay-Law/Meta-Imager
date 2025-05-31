@@ -23,6 +23,7 @@ Thumbs.db
 docker-compose.override.yml
 docker-compose.*.yml
 !docker-compose.yml
+config.json
 
 # Build artifacts
 dist/
