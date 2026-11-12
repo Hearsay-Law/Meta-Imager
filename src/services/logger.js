@@ -30,6 +30,17 @@ const consoleFormat = winston.format.printf(
   }
 );
 
+// Log files rotate instead of growing forever. When a file reaches its size
+// limit it becomes combined1.log (older ones shift to combined2.log, ...),
+// a fresh combined.log starts, and the oldest beyond maxFiles is deleted.
+// The newest lines are always in combined.log / error.log.
+const MB = 1024 * 1024;
+const rotation = (maxMegabytes, maxFiles) => ({
+  maxsize: maxMegabytes * MB,
+  maxFiles,
+  tailable: true,
+});
+
 // Create logger instance
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
@@ -48,6 +59,7 @@ const logger = winston.createLogger({
     new winston.transports.File({
       filename: "error.log",
       level: "error",
+      ...rotation(2, 3), // at most about 6 MB
       format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json()
@@ -56,6 +68,7 @@ const logger = winston.createLogger({
     // File transport for all logs
     new winston.transports.File({
       filename: "combined.log",
+      ...rotation(10, 5), // at most about 50 MB
       format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json()
