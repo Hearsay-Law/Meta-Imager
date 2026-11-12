@@ -32,6 +32,12 @@ const keywordsMap = {
   wooden: "Material: Wood",
   marble: "Material: Marble",
 
+  // Loras: an entry named after a lora's file (no folder, no .safetensors)
+  // tags every image made with it. Loras are read from the image's
+  // "Lora_N Model name" lines and must match an entry by their whole name;
+  // a lora with no entry adds no tag.
+  film_grain_v2: ["Style: Film", "Style: Grain"],
+
   // Add more keywords as needed...
 };
 

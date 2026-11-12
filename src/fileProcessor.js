@@ -6,6 +6,7 @@ const path = require("path");
 const sharp = require("sharp");
 const { keywordsMap } = require("./keywords");
 const KeywordMatcher = require("./services/keywordMatcher");
+const { extractLoraNames } = require("./services/loraExtractor");
 const exifToolService = require("./services/exifToolService");
 const { addWatermark } = require("./services/watermarkService");
 const tempFileService = require("./services/tempFileService");
@@ -86,6 +87,18 @@ async function processFile(filePath, destOutputDir) {
     for (const prompt of prompts) {
       const keywords = keywordMatcher.findKeywords(prompt.originalText);
       matchedKeywords.push(...keywords);
+    }
+
+    // Loras the image was made with: a lora adds the keywords its name maps
+    // to in keywords.js, and nothing if it has no entry.
+    const loraNames = extractLoraNames(metadata);
+    if (loraNames.length > 0) {
+      const loraSummary = loraNames.map((name) => {
+        const keywords = keywordMatcher.findExact(name);
+        matchedKeywords.push(...keywords);
+        return keywords.length ? `${name} -> ${keywords.join(", ")}` : `${name} (no entry)`;
+      });
+      logInfo(operation, `Loras: ${loraSummary.join("; ")}`, { filename });
     }
 
     // Remove duplicates

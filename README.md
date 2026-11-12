@@ -72,6 +72,17 @@ const keywordsMap = {
 };
 ```
 
+The same map also tags images by the loras they were made with. ComfyUI's
+"Save Image With Metadata" node records each lora as a `Lora_N Model name`
+line; an entry named after the lora's file (no folder, no extension) adds its
+keywords. A lora must match an entry by its whole name (case and spaces are
+ignored), and a lora with no entry adds no tag. The console logs each image's
+loras, which shows the names to use:
+
+```
+ProcessFile: Loras: film_grain_v2 -> Style: Film, Style: Grain; add_detail (no entry)
+```
+
 ## Usage
 
 Start the application:

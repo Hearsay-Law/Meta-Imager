@@ -93,6 +93,19 @@ class KeywordMatcher {
     return Array.from(matches);
   }
 
+  // Keywords for a term that must match a map entry as a whole (e.g. a lora
+  // name), unlike findKeywords, which looks for entries inside prompt phrases.
+  // Case and spaces are ignored, as for prompt entries.
+  findExact(term) {
+    if (!term || typeof term !== "string") return [];
+    const key = term.toLowerCase().trim();
+    const match =
+      this.normalizedKeywordsMap[key] ??
+      this.normalizedKeywordsMap[key.replace(/\s+/g, "")];
+    if (match === undefined) return [];
+    return Array.isArray(match) ? match : [match];
+  }
+
   findKeywords(text) {
     if (!text || typeof text !== "string") return [];
 
