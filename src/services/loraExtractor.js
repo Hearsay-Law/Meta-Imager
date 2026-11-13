@@ -6,7 +6,10 @@
 //   Lora_0 Model name: film_grain_v2.safetensors, Lora_0 Strength model: 0.8, ...
 // (after "Negative prompt:", so this never touches the prompt/description).
 
-const LORA_NAME = /Lora_\d+ Model name: ([^,\n]+)/g;
+// A name can contain commas ("Olivia Holt (OliviaHolt,)"), so it runs up to
+// the next field (", Lora_0 Model hash: ...", ", Hashes: ...") or line end.
+const LORA_NAME =
+  /Lora_\d+ Model name: (.+?)(?=, (?:Lora_\d+ |Hashes: |[A-Z][A-Za-z ]*: )|\n|$)/g;
 const MODEL_EXTENSION = /\.(safetensors|ckpt|pt|pth|bin)$/i;
 
 // "SD1.5\film_grain_v2.safetensors" -> "film_grain_v2"
